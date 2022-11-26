@@ -1,0 +1,468 @@
+{% extends "base.html" %} {% block content %}
+
+<div class="mt-3">토렌트 파일 정보</div>
+
+<form>
+    <div class="custom-file mt-2">
+        <input type="file" accept=".torrent" class="custom-file-input" id="customFile">
+        <label class="custom-file-label" for="customFile"></label>
+    </div>
+    <button id="get_info_file_btn" name="get_info_file_btn" class="btn btn-sm btn-outline-success mt-2 mb-1">가져오기</button>
+</form>
+
+<form>
+    <div class="form-group mt-3 mb-2">
+        <label for="uri_url">마그넷 혹은 웹에 있는 토렌트 주소</label>
+        <input type="text" class="form-control" id="uri_url" aria-describedby="urlhelp" placeholder="">
+        <small id="urlhelp" class="form-text text-muted">http나 magnet으로 시작하는 주소를 입력하세요. 아니면 캐시에서 토렌트 이름 검색</small>
+    </div>
+    <button id="get_info_url_btn" name="get_info_url_btn" class="btn btn-sm btn-outline-success mb-1">가져오기</button>
+</form>
+
+<div class="mt-3 d-flex w-100 justify-content-between">
+    <h6 class="mt-2 mb-0" style="flex: 1;">최근 검색 결과 <span class="text-muted small" id="cache-loaded"></span></h6>
+    <button id="remove_list_items" name="remove_list_items" class="btn btn-sm btn-outline-danger">목록삭제</button>
+</div>
+<!--TODO: 이름으로 검색-->
+
+<div class="row mt-3 mb-3" id="search-history">
+
+<template id="item-template">
+    <div class="col-lg-6 col-md-12 col-sm-12 col-12 animated fadeIn">
+    <div class="card mb-3 shadow-sm" id="torrent_info">
+        <div class="card-body">
+            <div class="d-flex w-100 justify-content-between" id="card-title">
+                <h6 class="card-title text-truncate" style="flex: 1;" id="torrent_name" title="토렌트 이름"></h6>
+                <p class="text-muted" id="creation_date" title=""></p>
+            </div>
+            <p class="card-text mb-0 text-muted text-truncate" id="short_magnet" title="짧은 마그넷"></p>
+            <p class="card-text text-muted text-truncate" id="selected_details"></p>
+            <a href="#" class="card-link" id="view_tbl_details">상세보기</a>
+            <a href="#" class="card-link" id="view_raw_json">JSON</a>
+            <a href="#" class="card-link" id="torrent_file" target="_blank">토렌트 파일</a>
+            {# <a href="#" class="card-link" id="refresh_item">새로고침</a> #}
+            <a href="#" class="card-link text-danger" id="remove_item">항목삭제</a>
+        </div>
+    </div>
+    </div>
+</template>
+
+</div>
+
+<!-- element to trigger the IntersectionObserver -->
+<div class="d-flex justify-content-center mb-3" id="sentinel">
+    <div class="spinner-border" role="status"></div>
+</div>
+<!--전체-->
+
+<style type="text/css">
+    table .table {
+        margin: 0;
+    }
+    
+    tr th {
+        width: 100px;
+    }
+    
+    table td ul {
+        padding-left: 0 !important;
+        list-style-position: inside;
+        list-style-type: decimal;
+    }
+
+    table .table th {
+        border-top: none;
+        border-bottom: none;
+    }
+</style>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" integrity="sha512-SfTiTlX6kk+qitfevl/7LibUOeJWlt9rbyDn92a1DqWOw9vWG2MFoays0sgObmWazO5BQPiFucnnEAjpAB+/Sw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" integrity="sha512-c42qTSw/wPZ3/5LBzD+Bw5f7bSF2oxou6wEb+I/lqeaKV5FDIfMvvRp772y4jcJLKuGUOpbJMdg/BTl50fJYAw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+
+<script type="text/javascript">
+    var package_name = "{{arg['package_name']}}";
+    var list_url_base = `/${package_name}/ajax/cache?action=list`;
+
+    // Get references to the dom elements
+    var scroller = document.querySelector("#search-history");
+    var template = document.querySelector('#item-template');
+    var loaded = document.querySelector("#cache-loaded");
+    var sentinel = document.querySelector('#sentinel');
+
+    var counter = 0;
+    var list_total = 0;
+    var list_url = list_url_base;
+
+    // Function to request new items and render to the dom
+    // https://pythonise.com/categories/javascript/infinite-lazy-loading
+    function loadItems() {
+        // Use fetch to request data and pass the counter value in the QS
+        fetch(`${list_url}&c=${counter}`).then((response) => {
+            response.json().then((res) => {
+                if (!res.success) {
+                    sentinel.innerHTML = `ERROR: ${res.log}`;
+                    return;
+                }
+                list_total = res.total;
+                // Iterate over the items in the response
+                for (var i = 0; i < res.info.length; i++) {
+                    render_single_item(res.info[i], false);
+                    // Increment the counter
+                    counter += 1;
+                    // Update the counter
+                    loaded.innerText = `${counter}/${list_total}`;
+                }
+                if (res.total == counter) {
+                    sentinel.innerHTML = "No more items";
+                    intersectionObserver.unobserve(sentinel);
+                } else if (counter < 5) {
+                    // Temporary fix
+                    intersectionObserver.unobserve(sentinel);
+                    intersectionObserver.observe(sentinel);
+                }
+            })
+        })
+    }
+
+    // Create a new IntersectionObserver instance
+    var intersectionObserver = new IntersectionObserver(entries => {
+        // Uncomment below to see the entry.intersectionRatio when
+        // the sentinel comes into view
+
+        // entries.forEach(entry => {
+        //   console.log(entry.intersectionRatio);
+        // })
+
+        // If intersectionRatio is 0, the sentinel is out of view
+        // and we don't need to do anything. Exit the function
+        if (entries[0].intersectionRatio <= 0) {
+            return;
+        }
+
+        // Call the loadItems function
+        loadItems();
+    });
+
+    // Instruct the IntersectionObserver to watch the sentinel
+    intersectionObserver.observe(sentinel);
+
+    function reloadItems(list_url_params='') {
+        list_url = list_url_base + list_url_params;
+        intersectionObserver.unobserve(sentinel);
+        scroller.querySelectorAll('*').forEach(n => n.remove());
+        counter = 0;
+        list_total = 0;
+        loaded.innerText = `${counter}/${list_total}`;
+        sentinel.innerHTML = `<div class="spinner-border" role="status"></div>`;
+        intersectionObserver.observe(sentinel);
+    }
+
+    $(".custom-file-input").on("change", function() {
+        var fileName = $(this).val().split("\\").pop();
+        $(this).siblings(".custom-file-label").addClass("selected").html(fileName);
+    });
+
+    $("body").on('click', '#get_info_file_btn', function(e) {
+        e.preventDefault();
+        var current_file = $('#customFile').prop('files')[0];
+        if (jQuery.isEmptyObject(current_file)) {
+            $.notify('<strong>파일을 첨부해 주세요!</strong>', {
+                type: 'warning'
+            });
+            return;
+        }
+        var form_data = new FormData();
+        form_data.append('file', current_file);
+        $.ajax({
+            url: '/' + package_name + '/ajax/get_file_info',
+            type: "POST",
+            cache: false,
+            data: form_data,
+            processData: false,
+            contentType: false,
+            success: function(data) {
+                if (data.success) {
+                    reloadItems(`&infohash=${data.info.info_hash}`);
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+    $("body").on('click', '#get_info_url_btn', function(e) {
+        e.preventDefault();
+        uri_url = document.getElementById("uri_url").value;
+        if (uri_url.startsWith("magnet") || uri_url.startsWith("http")) {
+            get_torrent_info(uri_url);
+        } else {
+            reloadItems(`&name=${uri_url}`);
+        }
+    });
+
+    function get_torrent_info(uri_url) {
+        $.ajax({
+            url: '/' + package_name + '/ajax/get_torrent_info',
+            type: "POST",
+            cache: false,
+            data: {
+                uri_url: uri_url
+            },
+            dataType: "json",
+            success: function(data) {
+                if (data.success) {
+                    reloadItems(`&infohash=${data.info.info_hash}`);
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    }
+
+    function render_single_item(data, latest=true) {
+        const datetime = new Date(data.creation_date);
+        const datetimeFormat = new Intl.DateTimeFormat('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            hour12: false,
+            minute: 'numeric'
+        });
+        let short_magnet = 'magnet:?xt=urn:btih:' + data.info_hash;
+        let etime = ("time" in data) ? data.time.total.toFixed(1) + '초' : 'N/A';
+        let torrent_file_href = '/' + package_name + '/ajax/get_torrent_file?uri=' + short_magnet;
+        
+        // Clone the HTML template
+        let template_clone = template.content.cloneNode(true);
+
+        template_clone.querySelector("#torrent_info").dataset["infohash"] = data.info_hash;
+        template_clone.querySelector("#torrent_name").innerHTML = data.name;
+        template_clone.querySelector("#creation_date").title = data.creation_date;
+        template_clone.querySelector("#creation_date").innerHTML = datetimeFormat.format(datetime);
+        template_clone.querySelector("#short_magnet").innerHTML = short_magnet;
+        template_clone.querySelector("#selected_details").innerHTML = `
+            <span class="text-muted" title="파일 크기">${data.total_size_fmt}</span> |
+            <span class="text-muted" title="파일 수">${(data.num_files > 1) ? `${data.num_files}개` : '단일'} 파일</span> |
+            <span class="text-muted" title="걸린 시간">${etime}</span>
+        `;
+        template_clone.querySelector("#torrent_file").href = torrent_file_href;
+
+        // Append template to dom
+        if (latest) {
+            scroller.prepend(template_clone);
+        } else {
+            scroller.appendChild(template_clone);
+        }
+    }
+
+    function make_table_from_json(data) {
+        str = `
+        <tr><th>이름</th><td>${data.name}<button id="clicktocopy" class="btn btn-sm btn-light ml-2"><i class="fa fa-copy"></i></button></td></th></tr>
+        <tr><th>전체 크기</th><td>${data.total_size_fmt}</td></th></tr>
+        ${(data.num_files > 1) ? `<tr><th>파일 수</th><td>${data.num_files}</td></th></tr>` : ''}
+        ${(data.num_files > 1) ? `<tr><th>파일 리스트</th><td style="padding:0 !important;">${make_filelist(data.files, data.name + '/')}</td></th></tr>` : '' }
+        <tr><th>조각 수</th><td>${data.num_pieces}</td></th></tr>
+        <tr><th>해쉬값</th><td>${data.info_hash}<button id="clicktocopy" class="btn btn-sm btn-light ml-2"><i class="fa fa-copy"></i></button></td></th></tr>
+        <tr><th>마그넷 주소</th><td><span class="d-inline-block text-truncate" style="max-width: 60ch;">${data.magnet_uri}</span><button id="clicktocopy" class="btn btn-sm btn-light ml-2"><i class="fa fa-copy"></i></button></td></th></tr>
+        ${(data.hasOwnProperty('seeders')) ? `<tr><th>시더 수</th><td>${data.seeders}</td></th></tr>` : ''}
+        ${(data.hasOwnProperty('peers')) ? `<tr><th>피어 수</th><td>${data.peers}</td></th></tr>` : ''}
+        ${(data.hasOwnProperty('trackers')) ? `<tr><th>트래커</th><td>${make_trackerlist(data.trackers)}</td></th></tr>` : ''}
+        <tr><th>생성일</th><td>${data.creation_date}</td></th></tr>
+        ${(data.creator.length) ? `<tr><th>생성 프로그램</th><td>${data.creator}</td></th></tr>` : ''}
+        ${(data.comment.length) ? `<tr><th>코멘트</th><td>${data.comment}</td></th></tr>` : ''}
+        ${(data.hasOwnProperty('time')) ? `<tr><th>걸린 시간</th><td>${data.time.total.toFixed(3)} 초</td></th></tr>` : ''}
+        `
+
+        tbl_node = `<table class="table table-sm table-hover"><tbody>${str}</tbody></table>`
+        return tbl_node;
+    }
+
+    function make_filelist(files, dirname) {
+        str = `
+        <thead><tr>
+            <th scope="col">
+				<div style="float: left;">파일 경로/이름</div>
+				<div style="float: right;"><span class="font-weight-normal pr-1" style="font-size: small;">${dirname}</span></div>
+			</th>
+            <th scope="col" style="text-align: right;">크기</th>
+        </tr></thead>
+        <tbody style="font-size: small;">
+        `
+        for (i in files) {
+            str += `
+            <tr>
+                <td>${files[i].path.replace(dirname, '')}</td>
+                <td style="text-align: right;">${files[i].size_fmt}</td>
+            </tr>`
+        }
+
+        tbl_node = `<table class="table table-sm table-hover" style="background-color: transparent;">${str}</tbody></table>`
+        return tbl_node;
+    }
+
+    function make_trackerlist(trackers) {
+        str = ''
+        for (i in trackers) {
+            str += `<li>${trackers[i]}</li>`
+        }
+
+        ul_node = `<ul>${str}</ul>`
+        return ul_node;
+    }
+    
+    $("body").on('click', '#clicktocopy', function(e) {
+        let txt2copy = this.previousSibling.nodeValue;
+        if (txt2copy == null) {
+            txt2copy = $(this).prev('span').text();
+        }
+        copyToClipboard(txt2copy)
+            .then(() => { $.notify('<strong>복사하였습니다.</strong>', {type: 'success'}); })
+            .catch(() => console.log('clicktocopy failed'));
+    });
+
+    $("body").on('click', '#view_tbl_details', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/cache',
+            type: 'POST',
+            cache: false,
+            data: {
+                'action': 'list',
+                'infohash': $(this).closest('#torrent_info').data('infohash')
+            },
+            dataType: "json",
+            success: function (data) {
+                if (data.success) {
+                    document.getElementById("modal_title").innerHTML = '상세 정보';
+                    document.getElementById("modal_body").innerHTML = make_table_from_json(data.info[0]);
+                    $("#large_modal").modal();
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+    $("body").on('click', '#view_raw_json', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/cache',
+            type: 'POST',
+            cache: false,
+            data: {
+                'action': 'list',
+                'infohash': $(this).closest('#torrent_info').data('infohash')
+            },
+            dataType: "json",
+            success: function (data) {
+                if (data.success) {
+                    document.getElementById("modal_title").innerHTML = '상세 정보';
+                    document.getElementById("modal_body").innerHTML = "<pre>"+JSON.stringify(data.info[0], null, 2) + "</pre>";
+                    $("#large_modal").modal();
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+    $("body").on('click', '#remove_item', function(e) {
+        e.preventDefault();
+        var card = $(this).closest('#torrent_info');
+        $.ajax({
+            url: '/' + package_name + '/ajax/cache',
+            type: 'POST',
+            cache: false,
+            data: {
+                'action': 'delete',
+                'infohash': $(this).closest('#torrent_info').data('infohash')
+            },
+            dataType: "json",
+            success: function (data) {
+                if (data.success) {
+                    $(card).fadeOut(300, function() { $(card).parent().remove(); });
+                    list_total -= 1;
+                    counter -= 1;
+                    loaded.innerText = `${counter}/${list_total}`;
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+    
+    $("body").on('click', '#remove_list_items', function(e) {
+        e.preventDefault();
+        var infohash = [];
+        scroller.querySelectorAll('div.card').forEach(n => infohash.push($(n).data('infohash')));
+        document.getElementById("confirm_title").innerHTML = "캐시 삭제";
+        document.getElementById("confirm_body").innerHTML = `${infohash.length}개 항목을 삭제합니다.`;
+        $('#confirm_button').attr('onclick', 'remove_list_items_from_cache("'+infohash+'");');
+        $("#confirm_modal").modal();
+        return;
+    });
+
+    function remove_list_items_from_cache(infohash) {
+        $.ajax({
+            url: '/' + package_name + '/ajax/cache',
+            type: "POST",
+            cache: false,
+            dataType: "json",
+            data: {
+                'action': "delete",
+                'infohash': infohash
+            },
+            success: function(data) {
+                if (data.success) {
+                    scroller.querySelectorAll('*').forEach(n => n.remove());
+                    list_total = 0;
+                    counter = 0;
+                    loaded.innerText = `${counter}/${list_total}`;
+                } else {
+                    $.notify('<strong>실패하였습니다!!!</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    }
+
+    // https://stackoverflow.com/a/65996386/9689068
+    // return a promise
+    function copyToClipboard(textToCopy) {
+        // navigator clipboard api needs a secure context (https)
+        if (navigator.clipboard && window.isSecureContext) {
+            // navigator clipboard api method'
+            return navigator.clipboard.writeText(textToCopy);
+        } else {
+            // text area method
+            let textArea = document.createElement("textarea");
+            textArea.value = textToCopy;
+            // make the textarea out of viewport
+            textArea.style.position = "absolute";
+            textArea.style.opacity = 0;
+            document.body.appendChild(textArea);
+            textArea.select();
+            return new Promise((res, rej) => {
+                // here the magic happens
+                document.execCommand('copy') ? res() : rej();
+                textArea.remove();
+            });
+        }
+    }
+
+</script>
+
+
+{% endblock %}

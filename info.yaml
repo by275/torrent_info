@@ -1,0 +1,8 @@
+title: "토렌트 정보"
+version: "0.2.0"
+package_name: "torrent_info"
+developer: "by275"
+description: "토렌트 마그넷/파일 정보를 보여주는 플러그인"
+home: "https://github.com/by275/torrent_info"
+more: "https://raw.githubusercontent.com/by275/torrent_info/main/README.md"
+libtorrent_build: "2.0.8-221123"

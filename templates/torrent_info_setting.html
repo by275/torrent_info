@@ -1,0 +1,206 @@
+{% extends "base.html" %} {% block content %}
+
+<div>
+    <nav>
+        {{ macros.m_tab_head_start() }} 
+            {{ macros.m_tab_head('basic', '기본', true) }} 
+            {{ macros.m_tab_head('tracker', '트래커', false) }} 
+            {{ macros.m_tab_head('etc', '기타', false) }} 
+        {{ macros.m_tab_head_end() }}
+    </nav>
+    <div class="tab-content mb-3" id="nav-tabContent">
+        <!-- 일반 -->
+        {{ macros.m_tab_content_start('basic', true) }}
+        <form id="setting" name="setting">
+            {{ macros.setting_checkbox('use_dht', 'DHT 사용', value=arg['use_dht'], desc=['트래커 없이 마그넷 정보를 받아 오지만 iknowwhatyoudownload에 노출될 수 있습니다. 끄면 실패할 확률이 높아지거나 오래 걸릴 수 있습니다.']) }}
+            {{ macros.setting_checkbox('scrape', 'Scrape 사용', value=arg['scrape'], desc='피어 정보도 받아옵니다. 활성 토렌트인지 확인할 때 유용. 대신 오래 걸림.') }}
+            {{ macros.setting_input_int('timeout', '대기 시간', value=arg['timeout'], min='1', placeholder='30', desc='마그넷 정보를 받아올때 너무 오래 걸리면 중지합니다. 단위: 초') }}
+            {{ macros.setting_input_int('n_try', '시도 횟수', value=arg['n_try'], min='1', max='256', placeholder='1', desc='최솟값: 1 (처음 한 번만 시도)') }}
+            {{ macros.setting_input_text('http_proxy', 'HTTP Proxy', value=arg['http_proxy'], placeholder='http://username:password@hostname:port/', desc=['DHT가 꺼지고 모든 연결이 프록시를 통하므로 udp가 아닌 http 트래커가 필요합니다. 비워두면 적용하지 않습니다.']) }}
+            {{ macros.setting_input_int('list_pagesize', '페이지 크기', value=arg['list_pagesize'], min='1', max='100', placeholder='20', desc='검색 결과 로딩 단위') }}
+            {{ macros.setting_buttons([['globalSettingSaveBtn', '저장']]) }}
+        </form>
+        {{ macros.m_tab_content_end() }}
+
+        <!-- 트래커 -->
+        {{ macros.m_tab_content_start('tracker', false) }}
+        <form id="setting_tracker" name="setting_tracker">
+            {{ macros.setting_input_textarea('trackers', '보조 트래커', value=arg['trackers'], row='19', desc=['마그넷에 트래커가 없는 경우 보조로 사용합니다. Enter로 구분']) }}
+            {{ macros.setting_select_and_buttons('tracker_update_from', '트래커 리스트', arg['tracker_update_from_list'], col='9', desc=['업데이트에 사용할 트래커 리스트를 선택하세요. 출처: https://github.com/ngosang/trackerslist'], value=arg['tracker_update_from']) }}
+            {{ macros.setting_input_int('tracker_update_every', '자동 업데이트', value=arg['tracker_update_every'], min='0', placeholder='15', desc='위 리스트로부터 자동으로 받아옵니다. 0이면 업데이트 하지 않음. 주기: 일') }}
+            {{ macros.setting_button_with_info([['tracker_update_now_btn', '지금 업데이트']], '수동 업데이트', '최근 업데이트: ' ~ arg['tracker_last_update']) }}
+            {{ macros.setting_buttons([['tracker_setting_save_btn', '저장']]) }}
+        </form>
+        {{ macros.m_tab_content_end() }}
+
+        <!-- 기타 -->
+        {{ macros.m_tab_content_start('etc', false) }}
+        {{ macros.info_text('plugin_ver', left='플러그인 버전', value=arg['plugin_ver']) }}
+        {{ macros.setting_button_with_info([['install_btn', '설치하기']], 'libtorrent 설치', 'alpine/ubuntu 도커만 지원. 네이티브라면 직접 설치 후 새로고침 해 보세요.') }}
+        {{ macros.setting_button_with_info([['uninstall_btn', '삭제하기']], 'libtorrent 삭제', '설치가 안되면 삭제 후 다시 시도해 보세요.') }}
+        {{ macros.setting_button_with_info([['clear_cache_btn', '재설정']], '검색 결과 비우기', '') }}
+        {{ macros.m_hr() }}
+        {{ macros.info_text_go('json_api', 'JSON API', value=arg['json_api'], desc=['', '파라미터 (둘 중 하나 반드시 입력)', ' - uri: 마그넷 주소. magnet으로 시작하지 않으면 hash로 간주하여 자동완성. 인코딩 된 주소 권장', ' - url: 웹에 있는 토렌트 파일 주소. SJVA에서 접근할 수 있어야 함.']) }}
+        {{ macros.m_hr() }}
+        {{ macros.info_text_go('m2t_api', 'MAGNET2TORRENT API', value=arg['m2t_api'], desc=['', '파라미터 (GET만 허용)', ' - uri: 마그넷 주소. magnet으로 시작하지 않으면 hash로 간주하여 자동완성. 인코딩 된 주소 권장']) }}
+
+        {{ macros.m_tab_content_end() }}
+    </div>
+    <!--tab-content-->
+</div>
+<!--전체-->
+
+
+
+<script type="text/javascript">
+    var package_name = "{{arg['package_name']}}";
+
+    $(document).ready(function() {
+
+        $(function() {
+            $.ajax({
+                url: '/' + package_name + '/ajax/is_installed',
+                type: "POST",
+                cache: false,
+                data: {},
+                dataType: "json",
+                success: function(data) {
+                    if (data.installed) {
+                        $('#install_btn').prop('disabled', true);
+                        $('#install_btn').html('설치됨');
+                        $('#install_btn').parent().next().html('<em>libtorrent ' + data.version + '</em>');
+                    } else {
+                        $('.nav-tabs a[href="#etc"]').tab('show');
+                    }
+                }
+            });
+        });
+
+        $(function() {
+            $.ajax({
+                url: '/' + package_name + '/ajax/cache',
+                type: "POST",
+                cache: false,
+                data: {},
+                dataType: "json",
+                success: function(data) {
+                    update_cache_status(data);
+                }
+            });
+        });
+
+    });
+
+    // libtorrent 설치 버튼
+    $("body").on('click', '#install_btn', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/install',
+            type: "POST",
+            cache: false,
+            dataType: "json",
+            success: function(data) {
+                if (!data.success) {
+                    $.notify('<strong>실패하였습니다.</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+// libtorrent 설치 버튼
+$("body").on('click', '#uninstall_btn', function(e) {
+    e.preventDefault();
+    $.ajax({
+        url: '/' + package_name + '/ajax/uninstall',
+        type: "POST",
+        cache: false,
+        dataType: "json",
+        success: function(data) {
+            if (!data.success) {
+                $.notify('<strong>실패하였습니다.</strong><br>' + data.log, {
+                    type: 'warning'
+                });
+            }
+        }
+    });
+});
+
+    // 캐시 현황 업데이트
+    function update_cache_status(data) {
+        if (data.success) {
+            $('#clear_cache_btn').parent().next().html(
+                '<em>현재 ' + data.count.toString() + '개의 토렌트 정보를 저장 중</em>'
+            );
+        } else {
+            $('#clear_cache_btn').parent().next().html(
+                '<em>캐시 현황을 가져오는데 문제가 있습니다: ' + data.log + '</em>'
+            );
+        }
+    }
+
+    // clear_cache 버튼
+    $("body").on('click', '#clear_cache_btn', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/cache',
+            type: "POST",
+            cache: false,
+            dataType: "json",
+            data: {action: "clear"},
+            success: function(data) {
+                update_cache_status(data);
+            }
+        });
+    });
+
+    // update_tracker 버튼
+    $("body").on('click', '#tracker_update_now_btn', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/tracker_update',
+            type: "POST",
+            cache: false,
+            dataType: "json",
+            data: {},
+            success: function(data) {
+                if (data.success) {
+                    $.notify('<strong>성공적으로 업데이트하였습니다.</strong><br>새로고침하여 확인하세요.', {
+                        type: 'success'
+                    });
+                } else {
+                    $.notify('<strong>문제가 있습니다: </strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+    // tracker_setting_save_btn 버튼
+    $("body").on('click', '#tracker_setting_save_btn', function(e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/' + package_name + '/ajax/tracker_save',
+            type: "POST",
+            cache: false,
+            dataType: "json",
+            data: getFormdata('#setting_tracker'),
+            success: function(data) {
+                if (data.success) {
+                    $.notify('<strong>설정을 저장하였습니다.</strong>', {
+                        type: 'success'
+                    });
+                } else {
+                    $.notify('<strong>설정 저장에 실패하였습니다.</strong><br>' + data.log, {
+                        type: 'warning'
+                    });
+                }
+            }
+        });
+    });
+
+</script>
+
+{% endblock %}
