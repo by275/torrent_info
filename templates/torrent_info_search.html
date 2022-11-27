@@ -234,7 +234,7 @@
             minute: 'numeric'
         });
         let short_magnet = 'magnet:?xt=urn:btih:' + data.info_hash;
-        let etime = ("time" in data) ? data.time.total.toFixed(1) + '초' : 'N/A';
+        let etime = ("elapsed_time" in data) ? data.elapsed_time.toFixed(1) + '초' : 'N/A';
         let torrent_file_href = '/' + package_name + '/ajax/get_torrent_file?uri=' + short_magnet;
         
         // Clone the HTML template
@@ -275,7 +275,7 @@
         <tr><th>생성일</th><td>${data.creation_date}</td></th></tr>
         ${(data.creator.length) ? `<tr><th>생성 프로그램</th><td>${data.creator}</td></th></tr>` : ''}
         ${(data.comment.length) ? `<tr><th>코멘트</th><td>${data.comment}</td></th></tr>` : ''}
-        ${(data.hasOwnProperty('time')) ? `<tr><th>걸린 시간</th><td>${data.time.total.toFixed(3)} 초</td></th></tr>` : ''}
+        ${(data.hasOwnProperty('elapsed_time')) ? `<tr><th>걸린 시간</th><td>${data.elapsed_time.toFixed(3)} 초</td></th></tr>` : ''}
         `
 
         tbl_node = `<table class="table table-sm table-hover"><tbody>${str}</tbody></table>`

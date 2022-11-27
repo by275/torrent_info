@@ -13,7 +13,6 @@
         {{ macros.m_tab_content_start('basic', true) }}
         <form id="setting" name="setting">
             {{ macros.setting_checkbox('use_dht', 'DHT 사용', value=arg['use_dht'], desc=['트래커 없이 마그넷 정보를 받아 오지만 iknowwhatyoudownload에 노출될 수 있습니다. 끄면 실패할 확률이 높아지거나 오래 걸릴 수 있습니다.']) }}
-            {{ macros.setting_checkbox('scrape', 'Scrape 사용', value=arg['scrape'], desc='피어 정보도 받아옵니다. 활성 토렌트인지 확인할 때 유용. 대신 오래 걸림.') }}
             {{ macros.setting_input_int('timeout', '대기 시간', value=arg['timeout'], min='1', placeholder='30', desc='마그넷 정보를 받아올때 너무 오래 걸리면 중지합니다. 단위: 초') }}
             {{ macros.setting_input_int('n_try', '시도 횟수', value=arg['n_try'], min='1', max='256', placeholder='1', desc='최솟값: 1 (처음 한 번만 시도)') }}
             {{ macros.setting_input_text('http_proxy', 'HTTP Proxy', value=arg['http_proxy'], placeholder='http://username:password@hostname:port/', desc=['DHT가 꺼지고 모든 연결이 프록시를 통하므로 udp가 아닌 http 트래커가 필요합니다. 비워두면 적용하지 않습니다.']) }}

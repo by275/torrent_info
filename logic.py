@@ -15,7 +15,7 @@ from plugin import PluginModuleBase, F
 from tool import ToolModalCommand
 
 # local
-from .util import size_fmt, pathscrub
+from .util import convert_torrent_info, pathscrub
 from .setup import P
 
 plugin = P
@@ -28,7 +28,6 @@ plugin_info = plugin.plugin_info
 class LogicMain(PluginModuleBase):
     db_default = {
         "use_dht": "True",
-        "scrape": "False",
         "timeout": "15",
         "trackers": "",
         "n_try": "3",
@@ -190,7 +189,7 @@ class LogicMain(PluginModuleBase):
 
                     # override db default by api input
                     func_args = {}
-                    for k in ["scrape", "use_dht", "no_cache"]:
+                    for k in ["use_dht", "no_cache"]:
                         if k in data:
                             func_args[k] = data.get(k).lower() == "true"
                     for k in ["timeout", "n_try"]:
@@ -214,7 +213,7 @@ class LogicMain(PluginModuleBase):
 
                 # override db default by api input
                 func_args = {}
-                for k in ["scrape", "use_dht"]:
+                for k in ["use_dht"]:
                     if k in data:
                         func_args[k] = data.get(k).lower() == "true"
                 for k in ["timeout", "n_try"]:
@@ -262,7 +261,7 @@ class LogicMain(PluginModuleBase):
         else:
             return lt.version
 
-    def install(self, show_modal=True):
+    def install(self, show_modal: bool = True) -> dict:
         try:
             # platform check - whitelist
             if platform.system() == "Linux" and F.config["running_type"] == "docker":
@@ -281,7 +280,7 @@ class LogicMain(PluginModuleBase):
             logger.exception("Exception while attempting install:")
             return {"success": False, "log": str(e)}
 
-    def uninstall(self):
+    def uninstall(self) -> dict:
         try:
             if platform.system() == "Linux" and F.config["running_type"] == "docker":
                 install_sh = os.path.join(os.path.dirname(__file__), "install.sh")
@@ -298,32 +297,9 @@ class LogicMain(PluginModuleBase):
             logger.exception("Exception while attempting uninstall:")
             return {"success": False, "log": str(e)}
 
-    def convert_torrent_info(self, torrent_info):
-        """from libtorrent torrent_info to python dictionary object"""
-        try:
-            import libtorrent as lt
-        except ImportError as _e:
-            raise ImportError("libtorrent package required") from _e
-
-        return {
-            "name": torrent_info.name(),
-            "num_files": torrent_info.num_files(),
-            "total_size": torrent_info.total_size(),  # in byte
-            "total_size_fmt": size_fmt(torrent_info.total_size()),  # in byte
-            "info_hash": str(torrent_info.info_hash()),  # original type: libtorrent.sha1_hash
-            "num_pieces": torrent_info.num_pieces(),
-            "creator": torrent_info.creator() if torrent_info.creator() else f"libtorrent v{lt.version}",
-            "comment": torrent_info.comment(),
-            "files": [
-                {"path": file.path, "size": file.size, "size_fmt": size_fmt(file.size)} for file in torrent_info.files()
-            ],
-            "magnet_uri": lt.make_magnet_uri(torrent_info),
-        }
-
     def parse_magnet_uri(
         self,
         magnet_uri,
-        scrape=None,
         use_dht=None,
         timeout=None,
         trackers=None,
@@ -338,8 +314,6 @@ class LogicMain(PluginModuleBase):
             raise ImportError("libtorrent package required") from _e
 
         # default function arguments from db
-        if scrape is None:
-            scrape = ModelSetting.get_bool("scrape")
         if use_dht is None:
             use_dht = ModelSetting.get_bool("use_dht")
         if timeout is None:
@@ -428,7 +402,7 @@ class LogicMain(PluginModuleBase):
         # handle
         handle = session.add_torrent(params)
 
-        if use_dht:
+        if settings.get("enable_dht", False):
             handle.force_dht_announce()
 
         max_try = max(n_try, 1)
@@ -446,7 +420,7 @@ class LogicMain(PluginModuleBase):
                 logger.debug(
                     "Successfully got metadata after %d*%d+%.2f seconds", tryid, timeout, timeout - timeout_value
                 )
-                time_metadata = tryid * timeout + (timeout - timeout_value)
+                etime = tryid * timeout + (timeout - timeout_value)
                 break
             if tryid + 1 == max_try:
                 session.remove_torrent(handle, True)
@@ -457,44 +431,24 @@ class LogicMain(PluginModuleBase):
         torrent.set_creator(f"libtorrent v{lt.version}")  # signature
         torrent_dict = torrent.generate()
 
-        torrent_info = self.convert_torrent_info(lt_info)
+        torrent_info = convert_torrent_info(lt_info)
         torrent_info.update(
             {
                 "trackers": params.trackers if not isinstance(params, dict) else params["trackers"],
                 "creation_date": datetime.fromtimestamp(torrent_dict[b"creation date"]).isoformat(),
-                "time": {"total": time_metadata, "metadata": time_metadata},
+                "elapsed_time": etime,
             }
         )
 
-        if scrape:
-            # start scraping
-            for tryid in range(max_try):
-                timeout_value = timeout
-                logger.debug("Trying to get peerinfo... %d/%d", tryid + 1, max_try)
-                while handle.status(0).num_complete < 0:
-                    time.sleep(0.1)
-                    timeout_value -= 0.1
-                    if timeout_value <= 0:
-                        break
-
-                if handle.status(0).num_complete >= 0:
-                    torrent_status = handle.status(0)
-                    logger.debug(
-                        "Successfully got peerinfo after %d*%d+%.2f seconds", tryid, timeout, timeout - timeout_value
-                    )
-                    time_scrape = tryid * timeout + (timeout - timeout_value)
-
-                    torrent_info.update(
-                        {
-                            "seeders": torrent_status.num_complete,
-                            "peers": torrent_status.num_incomplete,
-                        }
-                    )
-                    torrent_info["time"]["scrape"] = time_scrape
-                    torrent_info["time"]["total"] = torrent_info["time"]["metadata"] + torrent_info["time"]["scrape"]
-                    break
-                if tryid + 1 == max_try:
-                    logger.error("Timed out after %d*%d seconds", max_try, timeout)
+        # start scraping
+        if handle.status(0).num_complete >= 0:
+            torrent_status = handle.status(0)
+            torrent_info.update(
+                {
+                    "seeders": torrent_status.num_complete,
+                    "peers": torrent_status.num_incomplete,
+                }
+            )
 
         session.remove_torrent(handle, True)
 
@@ -506,7 +460,7 @@ class LogicMain(PluginModuleBase):
             return lt.bencode(torrent_dict), pathscrub(lt_info.name(), os="windows", filename=True)
         return torrent_info
 
-    def parse_torrent_file(self, torrent_file):
+    def parse_torrent_file(self, torrent_file: bytes) -> dict:
         # torrent_file >> torrent_dict >> lt_info >> torrent_info
         try:
             import libtorrent as lt
@@ -515,7 +469,7 @@ class LogicMain(PluginModuleBase):
 
         torrent_dict = lt.bdecode(torrent_file)
         lt_info = lt.torrent_info(torrent_dict)
-        torrent_info = self.convert_torrent_info(lt_info)
+        torrent_info = convert_torrent_info(lt_info)
         if b"announce-list" in torrent_dict:
             torrent_info.update({"trackers": [x.decode("utf-8") for x in torrent_dict[b"announce-list"][0]]})
         creation_date = torrent_dict[b"creation date"] if b"creation date" in torrent_dict else 0
@@ -528,9 +482,8 @@ class LogicMain(PluginModuleBase):
         }
         return torrent_info
 
-    def parse_torrent_url(self, url, http_proxy=None):
+    def parse_torrent_url(self, url: str, http_proxy: str = None) -> dict:
         if http_proxy is None:
             http_proxy = ModelSetting.get("http_proxy")
-        if http_proxy:
-            return self.parse_torrent_file(requests.get(url, proxies={"http": http_proxy, "https": http_proxy}).content)
-        return self.parse_torrent_file(requests.get(url).content)
+        proxies = {"http": http_proxy, "https": http_proxy} if http_proxy else None
+        return self.parse_torrent_file(requests.get(url, proxies=proxies).content)

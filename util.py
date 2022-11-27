@@ -58,10 +58,33 @@ def pathscrub(dirty_path: str, os: Optional[str] = None, filename: bool = False)
     return drive + path
 
 
-def size_fmt(num, suffix="B"):
+def size_fmt(num: int, suffix: str = "B") -> str:
     # Windows에서 쓰는 단위로 가자 https://superuser.com/a/938259
     for unit in ["", "K", "M", "G", "T", "P", "E", "Z"]:
         if abs(num) < 1000.0:
             return f"{num:3.1f} {unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f} Y{suffix}"
+
+
+def convert_torrent_info(torrent_info) -> dict:
+    """from libtorrent torrent_info to python dictionary object"""
+    try:
+        import libtorrent as lt
+    except ImportError as _e:
+        raise ImportError("libtorrent package required") from _e
+
+    return {
+        "name": torrent_info.name(),
+        "num_files": torrent_info.num_files(),
+        "total_size": torrent_info.total_size(),  # in byte
+        "total_size_fmt": size_fmt(torrent_info.total_size()),  # in byte
+        "info_hash": str(torrent_info.info_hash()),  # original type: libtorrent.sha1_hash
+        "num_pieces": torrent_info.num_pieces(),
+        "creator": torrent_info.creator() or f"libtorrent v{lt.version}",
+        "comment": torrent_info.comment(),
+        "files": [
+            {"path": file.path, "size": file.size, "size_fmt": size_fmt(file.size)} for file in torrent_info.files()
+        ],
+        "magnet_uri": lt.make_magnet_uri(torrent_info),
+    }
