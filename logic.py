@@ -1,5 +1,4 @@
 import os
-import traceback
 import json
 import time
 from datetime import datetime
@@ -65,9 +64,8 @@ class LogicMain(PluginModuleBase):
             if tracker_update_every > 0:
                 if (datetime.now() - datetime.strptime(tracker_last_update, "%Y-%m-%d")).days >= tracker_update_every:
                     self.update_tracker()
-        except Exception as e:
-            logger.error("Exception:%s", e)
-            logger.error(traceback.format_exc())
+        except Exception:
+            logger.exception("Exception on plugin load:")
 
     def process_menu(self, sub, req):
         arg = ModelSetting.to_dict()
@@ -81,9 +79,9 @@ class LogicMain(PluginModuleBase):
             ddns = F.SystemModelSetting.get("ddns")
             arg["json_api"] = f"{ddns}/{package_name}/api/json"
             arg["m2t_api"] = f"{ddns}/{package_name}/api/m2t"
-            if F.SystemModelSetting.get_bool("auth_use_apikey"):
-                arg["json_api"] += f"?apikey={F.SystemModelSetting.get('auth_apikey')}"
-                arg["m2t_api"] += f"?apikey={F.SystemModelSetting.get('auth_apikey')}"
+            if F.SystemModelSetting.get_bool("use_apikey"):
+                arg["json_api"] += f"?apikey={F.SystemModelSetting.get('apikey')}"
+                arg["m2t_api"] += f"?apikey={F.SystemModelSetting.get('apikey')}"
             return render_template(f"{package_name}_{sub}.html", sub=sub, arg=arg)
         if sub == "search":
             arg["cache_size"] = len(self.torrent_cache)
@@ -94,20 +92,13 @@ class LogicMain(PluginModuleBase):
         if sub == "install":
             return jsonify(self.install())
         if sub == "is_installed":
-            try:
-                is_installed = self.is_installed()
-                if is_installed:
-                    ret = {"installed": True, "version": is_installed}
-                else:
-                    ret = {"installed": False}
-                return jsonify(ret)
-            except Exception as e:
-                logger.error("Exception:%s", e)
-                logger.error(traceback.format_exc())
+            is_installed = self.is_installed()
+            return jsonify({"installed": bool(is_installed), "version": is_installed})
         if sub == "uninstall":
             return jsonify(self.uninstall())
-        if sub == "cache":
-            try:
+
+        try:
+            if sub == "cache":
                 p = request.form.to_dict() if request.method == "POST" else request.args.to_dict()
                 action = p.get("action", "")
                 infohash = p.get("infohash", "")
@@ -140,66 +131,41 @@ class LogicMain(PluginModuleBase):
                 if action == "list":
                     return jsonify({"success": True, "info": info, "total": total})
                 return jsonify({"success": True, "count": len(info)})
-            except Exception as e:
-                logger.error("Exception:%s", e)
-                logger.error(traceback.format_exc())
-                return jsonify({"success": False, "log": str(e)})
-        if sub == "tracker_update":
-            try:
+            if sub == "tracker_update":
                 self.update_tracker()
                 return jsonify({"success": True})
-            except Exception as e:
-                logger.error("Exception:%s", e)
-                logger.error(traceback.format_exc())
-                return jsonify({"success": False, "log": str(e)})
-        if sub == "tracker_save":
-            try:
+            if sub == "tracker_save":
                 self.tracker_save(request)
                 return jsonify({"success": True})
-            except Exception as e:
-                logger.error("Exception:%s", e)
-                logger.error(traceback.format_exc())
-                return jsonify({"success": False, "log": str(e)})
-        # if sub == "torrent_info":
-        #     # for global use - default arguments by function itself
-        #     try:
-        #         from torrent_info import Logic as TorrentInfoLogic
+            # if sub == "torrent_info":
+            #     # for global use - default arguments by function itself
+            #     try:
+            #         from torrent_info import Logic as TorrentInfoLogic
 
-        #         data = request.form["hash"]
-        #         logger.debug(data)
-        #         if data.startswith("magnet"):
-        #             ret = TorrentInfoLogic.parse_magnet_uri(data)
-        #         else:
-        #             ret = TorrentInfoLogic.parse_torrent_url(data)
-        #         return jsonify(ret)
-        #     except Exception as e:
-        #         logger.error("Exception:%s", e)
-        #         logger.error(traceback.format_exc())
-        if sub == "get_torrent_info":
-            # for local use - default arguments from user db
-            try:
+            #         data = request.form["hash"]
+            #         logger.debug(data)
+            #         if data.startswith("magnet"):
+            #             ret = TorrentInfoLogic.parse_magnet_uri(data)
+            #         else:
+            #             ret = TorrentInfoLogic.parse_torrent_url(data)
+            #         return jsonify(ret)
+            #     except Exception as e:
+            #         logger.error("Exception:%s", e)
+            #         logger.error(traceback.format_exc())
+            if sub == "get_torrent_info":
+                # for local use - default arguments from user db
                 if request.form["uri_url"].startswith("magnet"):
                     torrent_info = self.parse_magnet_uri(request.form["uri_url"])
                 else:
                     torrent_info = self.parse_torrent_url(request.form["uri_url"])
                 return jsonify({"success": True, "info": torrent_info})
-            except Exception as e:
-                logger.error("Exception:%s", e)
-                logger.error(traceback.format_exc())
-                return jsonify({"success": False, "log": str(e)})
-        if sub == "get_file_info":
-            try:
+            if sub == "get_file_info":
                 fs = request.files["file"]
                 fs.seek(0)
                 torrent_file = fs.read()
                 torrent_info = self.parse_torrent_file(torrent_file)
                 return jsonify({"success": True, "info": torrent_info})
-            except Exception as e:
-                logger.error("Exception:%s", str(e))
-                logger.error(traceback.format_exc())
-                return jsonify({"success": False, "log": str(e)})
-        if sub == "get_torrent_file" and request.method == "GET":
-            try:
+            if sub == "get_torrent_file" and request.method == "GET":
                 data = request.args.to_dict()
                 magnet_uri = data.get("uri", "")
                 if not magnet_uri.startswith("magnet"):
@@ -209,8 +175,9 @@ class LogicMain(PluginModuleBase):
                 resp.headers["Content-Type"] = "application/x-bittorrent"
                 resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
                 return resp
-            except Exception as e:
-                return jsonify({"success": False, "log": str(e)})
+        except Exception as e:
+            logger.exception("Exception while processing ajax requests:")
+            return jsonify({"success": False, "log": str(e)})
 
     def process_api(self, sub, req):
         try:
@@ -260,8 +227,7 @@ class LogicMain(PluginModuleBase):
                 resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
                 return resp
         except Exception as e:
-            logger.error("Exception:%s", e)
-            logger.error(traceback.format_exc())
+            logger.exception("Exception while processing api requests:")
             return jsonify({"success": False, "log": str(e)})
 
     def cache_init(self):
@@ -288,13 +254,13 @@ class LogicMain(PluginModuleBase):
         ModelSetting.set("trackers", json.dumps(new_trackers))
         ModelSetting.set("tracker_last_update", datetime.now().strftime("%Y-%m-%d"))
 
-    def is_installed(self):
+    def is_installed(self) -> str:
         try:
             import libtorrent as lt
-
-            return lt.version
         except ImportError:
-            return False
+            return ""
+        else:
+            return lt.version
 
     def install(self, show_modal=True):
         try:
@@ -312,8 +278,7 @@ class LogicMain(PluginModuleBase):
                 return {"success": True}
             return {"succes": False, "log": "지원하지 않는 시스템입니다."}
         except Exception as e:
-            logger.error("Exception:%s", e)
-            logger.error(traceback.format_exc())
+            logger.exception("Exception while attempting install:")
             return {"success": False, "log": str(e)}
 
     def uninstall(self):
@@ -330,8 +295,7 @@ class LogicMain(PluginModuleBase):
                 return {"success": True}
             return {"succes": False, "log": "지원하지 않는 시스템입니다."}
         except Exception as e:
-            logger.error("Exception:%s", e)
-            logger.error(traceback.format_exc())
+            logger.exception("Exception while attempting uninstall:")
             return {"success": False, "log": str(e)}
 
     def convert_torrent_info(self, torrent_info):
