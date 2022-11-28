@@ -8,7 +8,7 @@ from urllib.parse import quote, urlparse
 # third-party
 import requests
 from sqlitedict import SqliteDict
-from flask import request, render_template, jsonify, Response
+from flask import render_template, jsonify, Response
 
 # pylint: disable=import-error
 from plugin import PluginModuleBase, F
@@ -31,7 +31,7 @@ class LogicMain(PluginModuleBase):
         "timeout": "15",
         "n_try": "3",
         "http_proxy": "",
-        "list_pagesize": "20",
+        "pagesize": "20",
         "trackers": "",
         "tracker_last_update": "1970-01-01",
         "tracker_update_every": "30",
@@ -98,7 +98,7 @@ class LogicMain(PluginModuleBase):
 
         try:
             if sub == "cache":
-                p = request.form.to_dict() if request.method == "POST" else request.args.to_dict()
+                p = req.form.to_dict() if req.method == "POST" else req.args.to_dict()
                 action = p.get("action", "")
                 infohash = p.get("infohash", "")
                 name = p.get("name", "")
@@ -119,7 +119,7 @@ class LogicMain(PluginModuleBase):
                 total = len(info)
                 if p.get("c", ""):
                     counter = int(p.get("c"))
-                    pagesize = ModelSetting.get_int("list_pagesize")
+                    pagesize = ModelSetting.get_int("pagesize")
                     if counter == 0:
                         info = info[:pagesize]
                     elif counter == len(info):
@@ -134,14 +134,14 @@ class LogicMain(PluginModuleBase):
                 self.update_tracker()
                 return jsonify({"success": True})
             if sub == "tracker_save":
-                self.tracker_save(request)
+                self.tracker_save(req)
                 return jsonify({"success": True})
             # if sub == "torrent_info":
             #     # for global use - default arguments by function itself
             #     try:
             #         from torrent_info import Logic as TorrentInfoLogic
 
-            #         data = request.form["hash"]
+            #         data = req.form["hash"]
             #         logger.debug(data)
             #         if data.startswith("magnet"):
             #             ret = TorrentInfoLogic.parse_magnet_uri(data)
@@ -153,19 +153,19 @@ class LogicMain(PluginModuleBase):
             #         logger.error(traceback.format_exc())
             if sub == "get_torrent_info":
                 # for local use - default arguments from user db
-                if request.form["uri_url"].startswith("magnet"):
-                    torrent_info = self.parse_magnet_uri(request.form["uri_url"])
+                if req.form["uri_url"].startswith("magnet"):
+                    torrent_info = self.parse_magnet_uri(req.form["uri_url"])
                 else:
-                    torrent_info = self.parse_torrent_url(request.form["uri_url"])
+                    torrent_info = self.parse_torrent_url(req.form["uri_url"])
                 return jsonify({"success": True, "info": torrent_info})
             if sub == "get_file_info":
-                fs = request.files["file"]
+                fs = req.files["file"]
                 fs.seek(0)
                 torrent_file = fs.read()
                 torrent_info = self.parse_torrent_file(torrent_file)
                 return jsonify({"success": True, "info": torrent_info})
-            if sub == "get_torrent_file" and request.method == "GET":
-                data = request.args.to_dict()
+            if sub == "get_torrent_file" and req.method == "GET":
+                data = req.args.to_dict()
                 magnet_uri = data.get("uri", "")
                 if not magnet_uri.startswith("magnet"):
                     magnet_uri = "magnet:?xt=urn:btih:" + magnet_uri
@@ -177,7 +177,7 @@ class LogicMain(PluginModuleBase):
     def process_api(self, sub, req):
         try:
             if sub == "json":
-                data = request.form.to_dict() if request.method == "POST" else request.args.to_dict()
+                data = req.form.to_dict() if req.method == "POST" else req.args.to_dict()
                 if data.get("uri", ""):
                     magnet_uri = data.get("uri")
                     if not magnet_uri.startswith("magnet"):
@@ -200,9 +200,9 @@ class LogicMain(PluginModuleBase):
                 return jsonify({"success": True, "info": torrent_info})
 
             if sub == "m2t":
-                if request.method == "POST":
+                if req.method == "POST":
                     return jsonify({"success": False, "log": "POST method not allowed"})
-                data = request.args.to_dict()
+                data = req.args.to_dict()
                 magnet_uri = data.get("uri", "")
                 if not magnet_uri.startswith("magnet"):
                     magnet_uri = "magnet:?xt=urn:btih:" + magnet_uri
@@ -229,7 +229,7 @@ class LogicMain(PluginModuleBase):
             )
 
     def tracker_save(self, req):
-        for key, value in request.form.items():
+        for key, value in req.form.items():
             logger.debug({"key": key, "value": value})
             if key == "trackers":
                 value = json.dumps(value.split("\n"))

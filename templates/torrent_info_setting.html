@@ -16,7 +16,7 @@
             {{ macros.setting_input_int('timeout', '대기 시간', value=arg['timeout'], min='1', placeholder='30', desc='마그넷 정보를 받아올때 너무 오래 걸리면 중지합니다. 단위: 초') }}
             {{ macros.setting_input_int('n_try', '시도 횟수', value=arg['n_try'], min='1', max='256', placeholder='1', desc='최솟값: 1 (처음 한 번만 시도)') }}
             {{ macros.setting_input_text('http_proxy', 'HTTP Proxy', value=arg['http_proxy'], placeholder='http://username:password@hostname:port/', desc=['DHT가 꺼지고 모든 연결이 프록시를 통하므로 udp가 아닌 http 트래커가 필요합니다. 비워두면 적용하지 않습니다.']) }}
-            {{ macros.setting_input_int('list_pagesize', '페이지 크기', value=arg['list_pagesize'], min='1', max='100', placeholder='20', desc='검색 결과 로딩 단위') }}
+            {{ macros.setting_input_int('pagesize', '페이지 크기', value=arg['pagesize'], min='1', max='100', placeholder='20', desc='검색 결과 로딩 단위') }}
             {{ macros.setting_buttons([['globalSettingSaveBtn', '저장']]) }}
         </form>
         {{ macros.m_tab_content_end() }}
