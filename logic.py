@@ -1,6 +1,6 @@
 import os
 import json
-import time
+from timeit import default_timer as timer
 from datetime import datetime
 import platform
 from urllib.parse import quote, urlparse
@@ -15,7 +15,7 @@ from plugin import PluginModuleBase, F
 from tool import ToolModalCommand
 
 # local
-from .util import convert_torrent_info, pathscrub
+from .util import convert_lt_info, pathscrub, get_metadata
 from .setup import P
 
 plugin = P
@@ -29,14 +29,14 @@ class LogicMain(PluginModuleBase):
     db_default = {
         "use_dht": "True",
         "timeout": "15",
-        "trackers": "",
         "n_try": "3",
+        "http_proxy": "",
+        "list_pagesize": "20",
+        "trackers": "",
         "tracker_last_update": "1970-01-01",
         "tracker_update_every": "30",
         "tracker_update_from": "best",
         "libtorrent_build": "191217",
-        "http_proxy": "",
-        "list_pagesize": "20",
     }
 
     torrent_cache = None
@@ -405,54 +405,37 @@ class LogicMain(PluginModuleBase):
         if settings.get("enable_dht", False):
             handle.force_dht_announce()
 
-        max_try = max(n_try, 1)
-        for tryid in range(max_try):
-            timeout_value = timeout
-            logger.debug("Trying to get metadata... %d/%d", tryid + 1, max_try)
-            while not handle.has_metadata():
-                time.sleep(0.1)
-                timeout_value -= 0.1
-                if timeout_value <= 0:
-                    break
-
-            if handle.has_metadata():
-                lt_info = handle.get_torrent_info()
-                logger.debug(
-                    "Successfully got metadata after %d*%d+%.2f seconds", tryid, timeout, timeout - timeout_value
-                )
-                etime = tryid * timeout + (timeout - timeout_value)
-                break
-            if tryid + 1 == max_try:
-                session.remove_torrent(handle, True)
-                raise Exception(f"Timed out after {max_try}*{timeout} seconds")
+        try:
+            stime = timer()
+            lt_info, lt_status = get_metadata(handle, timeout=timeout, n_try=n_try)
+        finally:
+            session.remove_torrent(handle, True)
 
         # create torrent object and generate file stream
         torrent = lt.create_torrent(lt_info)
         torrent.set_creator(f"libtorrent v{lt.version}")  # signature
         torrent_dict = torrent.generate()
 
-        torrent_info = convert_torrent_info(lt_info)
+        torrent_info = convert_lt_info(lt_info)
         torrent_info.update(
             {
                 "trackers": params.trackers if not isinstance(params, dict) else params["trackers"],
                 "creation_date": datetime.fromtimestamp(torrent_dict[b"creation date"]).isoformat(),
-                "elapsed_time": etime,
+                "elapsed_time": timer() - stime,
             }
         )
 
-        # start scraping
-        if handle.status(0).num_complete >= 0:
-            torrent_status = handle.status(0)
+        # peerinfo if possible
+        if lt_status is not None:
             torrent_info.update(
                 {
-                    "seeders": torrent_status.num_complete,
-                    "peers": torrent_status.num_incomplete,
+                    "seeders": lt_status.num_complete,
+                    "peers": lt_status.num_incomplete,
                 }
             )
 
-        session.remove_torrent(handle, True)
-
         # caching for later use
+        self.cache_init()
         self.torrent_cache[torrent_info["info_hash"]] = {
             "info": torrent_info,
         }
@@ -469,7 +452,7 @@ class LogicMain(PluginModuleBase):
 
         torrent_dict = lt.bdecode(torrent_file)
         lt_info = lt.torrent_info(torrent_dict)
-        torrent_info = convert_torrent_info(lt_info)
+        torrent_info = convert_lt_info(lt_info)
         if b"announce-list" in torrent_dict:
             torrent_info.update({"trackers": [x.decode("utf-8") for x in torrent_dict[b"announce-list"][0]]})
         creation_date = torrent_dict[b"creation date"] if b"creation date" in torrent_dict else 0

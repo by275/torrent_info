@@ -1,7 +1,13 @@
 import ntpath
 import re
 import sys
+import time
 from typing import Optional
+
+# local
+from .setup import P
+
+logger = P.logger
 
 
 os_mode = None  # Can be 'windows', 'mac', 'linux' or None. None will auto-detect os.
@@ -67,24 +73,47 @@ def size_fmt(num: int, suffix: str = "B") -> str:
     return f"{num:.1f} Y{suffix}"
 
 
-def convert_torrent_info(torrent_info) -> dict:
+def convert_lt_info(lt_info) -> dict:
     """from libtorrent torrent_info to python dictionary object"""
     try:
         import libtorrent as lt
-    except ImportError as _e:
-        raise ImportError("libtorrent package required") from _e
+    except ImportError as e:
+        raise ImportError("libtorrent package required") from e
 
     return {
-        "name": torrent_info.name(),
-        "num_files": torrent_info.num_files(),
-        "total_size": torrent_info.total_size(),  # in byte
-        "total_size_fmt": size_fmt(torrent_info.total_size()),  # in byte
-        "info_hash": str(torrent_info.info_hash()),  # original type: libtorrent.sha1_hash
-        "num_pieces": torrent_info.num_pieces(),
-        "creator": torrent_info.creator() or f"libtorrent v{lt.version}",
-        "comment": torrent_info.comment(),
-        "files": [
-            {"path": file.path, "size": file.size, "size_fmt": size_fmt(file.size)} for file in torrent_info.files()
-        ],
-        "magnet_uri": lt.make_magnet_uri(torrent_info),
+        "name": lt_info.name(),
+        "num_files": lt_info.num_files(),
+        "total_size": lt_info.total_size(),  # in byte
+        "total_size_fmt": size_fmt(lt_info.total_size()),  # in byte
+        "info_hash": str(lt_info.info_hash()),  # original type: libtorrent.sha1_hash
+        "num_pieces": lt_info.num_pieces(),
+        "creator": lt_info.creator() or f"libtorrent v{lt.version}",
+        "comment": lt_info.comment(),
+        "files": [{"path": file.path, "size": file.size, "size_fmt": size_fmt(file.size)} for file in lt_info.files()],
+        "magnet_uri": lt.make_magnet_uri(lt_info),
     }
+
+
+def get_metadata(handle, timeout=None, n_try=None):
+    """retrieve libtorrent (torrent_info and torrent_status) from handle"""
+    max_try = max(n_try, 1)
+    for tryid in range(max_try):
+        timeout_value = timeout
+        logger.debug("Trying to get metadata... %d/%d", tryid + 1, max_try)
+        while not handle.has_metadata():
+            time.sleep(0.1)
+            timeout_value -= 0.1
+            if timeout_value <= 0:
+                break
+
+        if handle.has_metadata():
+            lt_info = handle.get_torrent_info()
+            logger.debug("Successfully got metadata after %d*%d+%.2f seconds", tryid, timeout, timeout - timeout_value)
+            break
+        if tryid + 1 == max_try:
+            raise TimeoutError(f"Timed out after {max_try}*{timeout} seconds")
+
+    # peerinfo if possible
+    if handle.status(0).num_complete >= 0:
+        return lt_info, handle.status(0)
+    return lt_info, None
