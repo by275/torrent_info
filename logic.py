@@ -169,11 +169,7 @@ class LogicMain(PluginModuleBase):
                 magnet_uri = data.get("uri", "")
                 if not magnet_uri.startswith("magnet"):
                     magnet_uri = "magnet:?xt=urn:btih:" + magnet_uri
-                torrent_file, torrent_name = self.parse_magnet_uri(magnet_uri, no_cache=True, to_torrent=True)
-                resp = Response(torrent_file)
-                resp.headers["Content-Type"] = "application/x-bittorrent"
-                resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
-                return resp
+                return self.parse_magnet_uri(magnet_uri, no_cache=True, to_torrent=True)
         except Exception as e:
             logger.exception("Exception while processing ajax requests:")
             return jsonify({"success": False, "log": str(e)})
@@ -220,11 +216,7 @@ class LogicMain(PluginModuleBase):
                     if k in data:
                         func_args[k] = int(data.get(k))
                 func_args.update({"no_cache": True, "to_torrent": True})
-                torrent_file, torrent_name = self.parse_magnet_uri(magnet_uri, **func_args)
-                resp = Response(torrent_file)
-                resp.headers["Content-Type"] = "application/x-bittorrent"
-                resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
-                return resp
+                return self.parse_magnet_uri(magnet_uri, **func_args)
         except Exception as e:
             logger.exception("Exception while processing api requests:")
             return jsonify({"success": False, "log": str(e)})
@@ -237,7 +229,7 @@ class LogicMain(PluginModuleBase):
             )
 
     def tracker_save(self, req):
-        for key, value in req.form.items():
+        for key, value in request.form.items():
             logger.debug({"key": key, "value": value})
             if key == "trackers":
                 value = json.dumps(value.split("\n"))
@@ -303,9 +295,9 @@ class LogicMain(PluginModuleBase):
         use_dht=None,
         timeout=None,
         trackers=None,
-        no_cache=None,
+        no_cache=False,
         n_try=None,
-        to_torrent=None,
+        to_torrent=False,
         http_proxy=None,
     ):
         try:
@@ -322,10 +314,6 @@ class LogicMain(PluginModuleBase):
             trackers = json.loads(ModelSetting.get("trackers"))
         if n_try is None:
             n_try = ModelSetting.get_int("n_try")
-        if no_cache is None:
-            no_cache = False
-        if to_torrent is None:
-            to_torrent = False
         if http_proxy is None:
             http_proxy = ModelSetting.get("http_proxy")
 
@@ -440,7 +428,12 @@ class LogicMain(PluginModuleBase):
             "info": torrent_info,
         }
         if to_torrent:
-            return lt.bencode(torrent_dict), pathscrub(lt_info.name(), os="windows", filename=True)
+            torrent_file = lt.bencode(torrent_dict)
+            torrent_name = pathscrub(lt_info.name(), os="windows", filename=True)
+            resp = Response(torrent_file)
+            resp.headers["Content-Type"] = "application/x-bittorrent"
+            resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
+            return resp
         return torrent_info
 
     def parse_torrent_file(self, torrent_file: bytes) -> dict:
