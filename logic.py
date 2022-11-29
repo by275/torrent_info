@@ -3,7 +3,7 @@ import json
 from timeit import default_timer as timer
 from datetime import datetime
 import platform
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 # third-party
 import requests
@@ -15,7 +15,8 @@ from plugin import PluginModuleBase, F
 from tool import ToolModalCommand
 
 # local
-from .util import convert_lt_info, pathscrub, get_metadata
+# from .task import Task
+from .util import convert_lt_info, pathscrub, get_metadata, get_lt_params, get_lt_session
 from .setup import P
 
 plugin = P
@@ -300,10 +301,7 @@ class LogicMain(PluginModuleBase):
         to_torrent=False,
         http_proxy=None,
     ):
-        try:
-            import libtorrent as lt
-        except ImportError as _e:
-            raise ImportError("libtorrent package required") from _e
+        import libtorrent as lt
 
         # default function arguments from db
         if use_dht is None:
@@ -318,22 +316,7 @@ class LogicMain(PluginModuleBase):
             http_proxy = ModelSetting.get("http_proxy")
 
         # parameters
-        params = lt.parse_magnet_uri(magnet_uri)
-
-        # prevent downloading
-        # https://stackoverflow.com/q/45680113
-        if isinstance(params, dict):
-            params["flags"] |= lt.add_torrent_params_flags_t.flag_upload_mode
-        else:
-            params.flags |= lt.add_torrent_params_flags_t.flag_upload_mode
-
-        lt_version = [int(v) for v in lt.version.split(".")]
-        if [0, 16, 13, 0] < lt_version < [1, 1, 3, 0]:
-            # for some reason the info_hash needs to be bytes but it's a struct called sha1_hash
-            if isinstance(params, dict):
-                params["info_hash"] = params["info_hash"].to_bytes()
-            else:
-                params.info_hash = params.info_hash.to_bytes()
+        params = get_lt_params(magnet_uri)
 
         # 캐시에 있으면...
         info_hash_from_magnet = str(params["info_hash"] if isinstance(params, dict) else params.info_hash)
@@ -341,61 +324,19 @@ class LogicMain(PluginModuleBase):
         if (not no_cache) and (info_hash_from_magnet in self.torrent_cache):
             return self.torrent_cache[info_hash_from_magnet]["info"]
 
-        # add trackers
-        if isinstance(params, dict):
-            if len(params["trackers"]) == 0:
-                params["trackers"] = trackers
-        else:
-            if len(params.trackers) == 0:
-                params.trackers = trackers
-
         # session
-        settings = {
-            # basics
-            # 'user_agent': 'libtorrent/' + lt.__version__,
-            "listen_interfaces": "0.0.0.0:6881",
-            # dht
-            "enable_dht": use_dht,
-            "use_dht_as_fallback": True,
-            "dht_bootstrap_nodes": "router.bittorrent.com:6881,dht.transmissionbt.com:6881,router.utorrent.com:6881,127.0.0.1:6881",
-            "enable_lsd": False,
-            "enable_upnp": True,
-            "enable_natpmp": True,
-            "announce_to_all_tiers": True,
-            "announce_to_all_trackers": True,
-            "aio_threads": 4 * 2,
-            "checking_mem_usage": 1024 * 2,
-        }
-        if http_proxy:
-            proxy_url = urlparse(http_proxy)
-            settings.update(
-                {
-                    "proxy_username": proxy_url.username,
-                    "proxy_password": proxy_url.password,
-                    "proxy_hostname": proxy_url.hostname,
-                    "proxy_port": proxy_url.port,
-                    "proxy_type": lt.proxy_type_t.http_pw
-                    if proxy_url.username and proxy_url.password
-                    else lt.proxy_type_t.http,
-                    "force_proxy": True,
-                    "anonymous_mode": True,
-                }
-            )
-        session = lt.session(settings)
-
-        session.add_extension("ut_metadata")
-        session.add_extension("ut_pex")
-        session.add_extension("metadata_transfer")
+        session = get_lt_session(use_dht=use_dht, http_proxy=http_proxy)
 
         # handle
         handle = session.add_torrent(params)
 
-        if settings.get("enable_dht", False):
+        if use_dht:
             handle.force_dht_announce()
 
         try:
             stime = timer()
             lt_info, lt_status = get_metadata(handle, timeout=timeout, n_try=n_try)
+            etime = timer() - stime
         finally:
             session.remove_torrent(handle, True)
 
@@ -409,7 +350,7 @@ class LogicMain(PluginModuleBase):
             {
                 "trackers": params.trackers if not isinstance(params, dict) else params["trackers"],
                 "creation_date": datetime.fromtimestamp(torrent_dict[b"creation date"]).isoformat(),
-                "elapsed_time": timer() - stime,
+                "elapsed_time": etime,
             }
         )
 
@@ -438,10 +379,7 @@ class LogicMain(PluginModuleBase):
 
     def parse_torrent_file(self, torrent_file: bytes) -> dict:
         # torrent_file >> torrent_dict >> lt_info >> torrent_info
-        try:
-            import libtorrent as lt
-        except ImportError as _e:
-            raise ImportError("libtorrent package required") from _e
+        import libtorrent as lt
 
         torrent_dict = lt.bdecode(torrent_file)
         lt_info = lt.torrent_info(torrent_dict)
