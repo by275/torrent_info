@@ -1,5 +1,5 @@
 title: "토렌트 정보"
-version: "0.2.0"
+version: "0.2.1"
 package_name: "torrent_info"
 developer: "by275"
 description: "토렌트 마그넷/파일 정보를 보여주는 플러그인"
