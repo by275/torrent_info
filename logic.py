@@ -1,6 +1,5 @@
 import os
 import json
-from timeit import default_timer as timer
 from datetime import datetime
 import platform
 from urllib.parse import quote
@@ -16,7 +15,7 @@ from tool import ToolModalCommand
 
 # local
 # from .task import Task
-from .util import convert_lt_info, pathscrub, get_metadata, get_lt_params, get_lt_session
+from .util import LibTorrent
 from .setup import P
 
 plugin = P
@@ -301,8 +300,6 @@ class LogicMain(PluginModuleBase):
         to_torrent=False,
         http_proxy=None,
     ):
-        import libtorrent as lt
-
         # default function arguments from db
         if use_dht is None:
             use_dht = ModelSetting.get_bool("use_dht")
@@ -316,85 +313,37 @@ class LogicMain(PluginModuleBase):
             http_proxy = ModelSetting.get("http_proxy")
 
         # parameters
-        params = get_lt_params(magnet_uri)
+        torrent = LibTorrent.parse_magnet_uri(magnet_uri, trackers=trackers)
 
         # 캐시에 있으면...
-        info_hash_from_magnet = str(params["info_hash"] if isinstance(params, dict) else params.info_hash)
         self.cache_init()
-        if (not no_cache) and (info_hash_from_magnet in self.torrent_cache):
-            return self.torrent_cache[info_hash_from_magnet]["info"]
+        if (not no_cache) and (torrent.info_hash in self.torrent_cache):
+            return self.torrent_cache[torrent.info_hash]["info"]
 
-        # session
-        session = get_lt_session(use_dht=use_dht, http_proxy=http_proxy)
-
-        # handle
-        handle = session.add_torrent(params)
-
-        if use_dht:
-            handle.force_dht_announce()
-
-        try:
-            stime = timer()
-            lt_info, lt_status = get_metadata(handle, timeout=timeout, n_try=n_try)
-            etime = timer() - stime
-        finally:
-            session.remove_torrent(handle, True)
-
-        # create torrent object and generate file stream
-        torrent = lt.create_torrent(lt_info)
-        torrent.set_creator(f"libtorrent v{lt.version}")  # signature
-        torrent_dict = torrent.generate()
-
-        torrent_info = convert_lt_info(lt_info)
-        torrent_info.update(
-            {
-                "trackers": params.trackers if not isinstance(params, dict) else params["trackers"],
-                "creation_date": datetime.fromtimestamp(torrent_dict[b"creation date"]).isoformat(),
-                "elapsed_time": etime,
-            }
-        )
-
-        # peerinfo if possible
-        if lt_status is not None:
-            torrent_info.update(
-                {
-                    "seeders": lt_status.num_complete,
-                    "peers": lt_status.num_incomplete,
-                }
-            )
+        info = torrent.get_metadata(use_dht=use_dht, http_proxy=http_proxy, timeout=timeout, n_try=n_try).to_dict()
 
         # caching for later use
         self.cache_init()
-        self.torrent_cache[torrent_info["info_hash"]] = {
-            "info": torrent_info,
+        self.torrent_cache[info["info_hash"]] = {
+            "info": info,
         }
         if to_torrent:
-            torrent_file = lt.bencode(torrent_dict)
-            torrent_name = pathscrub(lt_info.name(), os="windows", filename=True)
+            torrent_file, torrent_name = torrent.to_file()
             resp = Response(torrent_file)
             resp.headers["Content-Type"] = "application/x-bittorrent"
             resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(torrent_name + ".torrent")
             return resp
-        return torrent_info
+        return info
 
     def parse_torrent_file(self, torrent_file: bytes) -> dict:
-        # torrent_file >> torrent_dict >> lt_info >> torrent_info
-        import libtorrent as lt
-
-        torrent_dict = lt.bdecode(torrent_file)
-        lt_info = lt.torrent_info(torrent_dict)
-        torrent_info = convert_lt_info(lt_info)
-        if b"announce-list" in torrent_dict:
-            torrent_info.update({"trackers": [x.decode("utf-8") for x in torrent_dict[b"announce-list"][0]]})
-        creation_date = torrent_dict[b"creation date"] if b"creation date" in torrent_dict else 0
-        torrent_info.update({"creation_date": datetime.fromtimestamp(creation_date).isoformat()})
+        info = LibTorrent.from_torrent_file(torrent_file).to_dict()
 
         # caching for later use
         self.cache_init()
-        self.torrent_cache[torrent_info["info_hash"]] = {
-            "info": torrent_info,
+        self.torrent_cache[info["info_hash"]] = {
+            "info": info,
         }
-        return torrent_info
+        return info
 
     def parse_torrent_url(self, url: str, http_proxy: str = None) -> dict:
         if http_proxy is None:
