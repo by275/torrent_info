@@ -37,7 +37,6 @@ class LogicMain(PluginModuleBase):
         "tracker_last_update": "1970-01-01",
         "tracker_update_every": "30",
         "tracker_update_from": "best",
-        "libtorrent_build": "191217",
     }
 
     torrent_cache = None
@@ -51,12 +50,6 @@ class LogicMain(PluginModuleBase):
         try:
             # 토렌트 캐쉬 초기화
             self.cache_init()
-
-            # libtorrent 자동 설치
-            new_build = int(plugin_info["libtorrent_build"].rsplit("-", maxsplit=1)[-1])
-            installed_build = ModelSetting.get_int("libtorrent_build")
-            if (new_build > installed_build) or (not self.is_installed()):
-                self.install(show_modal=False)
 
             # tracker 자동 업데이트
             tracker_update_every = ModelSetting.get_int("tracker_update_every")
