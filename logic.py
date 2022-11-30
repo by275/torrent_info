@@ -1,20 +1,21 @@
-import os
 import json
-from datetime import datetime
+import os
 import platform
+import shlex
+from datetime import datetime
 from urllib.parse import quote
 
 # third-party
 import requests
+from flask import Response, jsonify, render_template
 from sqlitedict import SqliteDict
-from flask import render_template, jsonify, Response
+from werkzeug.exceptions import MethodNotAllowed
 
 # pylint: disable=import-error
-from plugin import PluginModuleBase, F
+from plugin import F, PluginModuleBase
 from tool import ToolModalCommand
 
 # local
-# from .task import Task
 from .util import LibTorrent
 from .setup import P
 
@@ -27,7 +28,7 @@ plugin_info = plugin.plugin_info
 
 class LogicMain(PluginModuleBase):
     db_default = {
-        "use_dht": "True",
+        "use_dht": "False",
         "timeout": "15",
         "n_try": "3",
         "http_proxy": "",
@@ -75,17 +76,26 @@ class LogicMain(PluginModuleBase):
                 [x, f"https://ngosang.github.io/trackerslist/trackers_{x}.txt"] for x in self.tracker_update_from_list
             ]
             arg["plugin_ver"] = plugin_info["version"]
-            ddns = F.SystemModelSetting.get("ddns")
-            arg["json_api"] = f"{ddns}/{package_name}/api/json"
-            arg["m2t_api"] = f"{ddns}/{package_name}/api/m2t"
-            if F.SystemModelSetting.get_bool("use_apikey"):
-                arg["json_api"] += f"?apikey={F.SystemModelSetting.get('apikey')}"
-                arg["m2t_api"] += f"?apikey={F.SystemModelSetting.get('apikey')}"
-            return render_template(f"{package_name}_{sub}.html", sub=sub, arg=arg)
-        if sub == "search":
+
+            # api usage
+            base_api = F.SystemModelSetting.get("ddns") + f"/{package_name}/api"
+            excmds = ["curl", "-X", "POST", "-H", "Content-Type: application/json"]
+            arg["m2i_api"] = shlex.join(
+                excmds + [f"{base_api}/m2i", "-d", json.dumps({"apikey": "APIKEY", "uri": "MAGNET_URI"})]
+            )
+            arg["t2i_api"] = shlex.join(
+                excmds + [f"{base_api}/t2i", "-d", json.dumps({"apikey": "APIKEY", "url": "TORRENT_URL"})]
+            )
+            excmds += ["-o", "filename.torrent"]
+            arg["m2t_api"] = shlex.join(
+                excmds + [f"{base_api}/m2t", "-d", json.dumps({"apikey": "APIKEY", "uri": "MAGNET_URI"})]
+            )
+        elif sub == "search":
             arg["cache_size"] = len(self.torrent_cache)
+        try:
             return render_template(f"{package_name}_{sub}.html", arg=arg)
-        return render_template("sample.html", title=f"{package_name} - {sub}")
+        except Exception:
+            return render_template("sample.html", title=f"{package_name} - {sub}")
 
     def process_ajax(self, sub, req):
         if sub == "install":
@@ -176,47 +186,53 @@ class LogicMain(PluginModuleBase):
 
     def process_api(self, sub, req):
         try:
-            if sub == "json":
-                data = req.form.to_dict() if req.method == "POST" else req.args.to_dict()
-                if data.get("uri", ""):
-                    magnet_uri = data.get("uri")
-                    if not magnet_uri.startswith("magnet"):
-                        magnet_uri = "magnet:?xt=urn:btih:" + magnet_uri
+            # only allow -X POST -H 'Content-Type: application/json'
+            if req.method != "POST":
+                raise MethodNotAllowed(valid_methods=["POST"])
+            _d = req.get_json()
+
+            uri = _d.get("uri", "")
+            url = _d.get("url", "")
+
+            if sub == "m2i":
+                if uri:
+                    if not uri.startswith("magnet"):
+                        uri = "magnet:?xt=urn:btih:" + uri
 
                     # override db default by api input
                     func_args = {}
                     for k in ["use_dht", "no_cache"]:
-                        if k in data:
-                            func_args[k] = data.get(k).lower() == "true"
+                        if k in _d:
+                            func_args[k] = _d.get(k).lower() == "true"
                     for k in ["timeout", "n_try"]:
-                        if k in data:
-                            func_args[k] = int(data.get(k))
+                        if k in _d:
+                            func_args[k] = int(_d.get(k))
 
-                    torrent_info = self.parse_magnet_uri(magnet_uri, **func_args)
-                elif data.get("url", ""):
-                    torrent_info = self.parse_torrent_url(data.get("url"))
-                else:
-                    return jsonify({"success": False, "log": 'At least one of "uri" or "url" parameter required'})
-                return jsonify({"success": True, "info": torrent_info})
+                    info = self.parse_magnet_uri(uri, **func_args)
+                    return jsonify({"success": True, "info": info})
+                return jsonify({"success": False, "log": "missing parameter: 'uri'"})
+
+            if sub == "t2i":
+                if url:
+                    info = self.parse_torrent_url(_d.get("url"))
+                    return jsonify({"success": True, "info": info})
+                return jsonify({"success": False, "log": "missing parameter: 'url'"})
 
             if sub == "m2t":
-                if req.method == "POST":
-                    return jsonify({"success": False, "log": "POST method not allowed"})
-                data = req.args.to_dict()
-                magnet_uri = data.get("uri", "")
-                if not magnet_uri.startswith("magnet"):
-                    magnet_uri = "magnet:?xt=urn:btih:" + magnet_uri
+                if uri:
+                    if not uri.startswith("magnet"):
+                        uri = "magnet:?xt=urn:btih:" + uri
 
-                # override db default by api input
-                func_args = {}
-                for k in ["use_dht"]:
-                    if k in data:
-                        func_args[k] = data.get(k).lower() == "true"
-                for k in ["timeout", "n_try"]:
-                    if k in data:
-                        func_args[k] = int(data.get(k))
-                func_args.update({"no_cache": True, "to_torrent": True})
-                return self.parse_magnet_uri(magnet_uri, **func_args)
+                    # override db default by api input
+                    func_args = {}
+                    for k in ["use_dht"]:
+                        if k in _d:
+                            func_args[k] = _d.get(k).lower() == "true"
+                    for k in ["timeout", "n_try"]:
+                        if k in _d:
+                            func_args[k] = int(_d.get(k))
+                    return self.parse_magnet_uri(uri, no_cache=True, to_torrent=True, **func_args)
+                return jsonify({"success": False, "log": "missing parameter: 'uri'"})
         except Exception as e:
             logger.exception("Exception while processing api requests:")
             return jsonify({"success": False, "log": str(e)})
@@ -225,7 +241,7 @@ class LogicMain(PluginModuleBase):
         if self.torrent_cache is None:
             db_file = os.path.join(F.config["path_data"], "db", f"{package_name}.db")
             self.torrent_cache = SqliteDict(
-                db_file, tablename=f"plugin_{package_name}_cache", encode=json.dumps, decode=json.loads, autocommit=True
+                db_file, tablename=f"{package_name}_cache", encode=json.dumps, decode=json.loads, autocommit=True
             )
 
     def tracker_save(self, req):
