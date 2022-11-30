@@ -200,13 +200,7 @@ class LogicMain(PluginModuleBase):
                         uri = "magnet:?xt=urn:btih:" + uri
 
                     # override db default by api input
-                    func_args = {}
-                    for k in ["use_dht", "no_cache"]:
-                        if k in _d:
-                            func_args[k] = _d.get(k).lower() == "true"
-                    for k in ["timeout", "n_try"]:
-                        if k in _d:
-                            func_args[k] = int(_d.get(k))
+                    func_args = {k: _d[k] for k in ["use_dht", "no_cache", "timeout", "n_try"] if k in _d}
 
                     info = self.parse_magnet_uri(uri, **func_args)
                     return jsonify({"success": True, "info": info})
@@ -224,13 +218,8 @@ class LogicMain(PluginModuleBase):
                         uri = "magnet:?xt=urn:btih:" + uri
 
                     # override db default by api input
-                    func_args = {}
-                    for k in ["use_dht"]:
-                        if k in _d:
-                            func_args[k] = _d.get(k).lower() == "true"
-                    for k in ["timeout", "n_try"]:
-                        if k in _d:
-                            func_args[k] = int(_d.get(k))
+                    func_args = {k: _d[k] for k in ["use_dht", "timeout", "n_try"] if k in _d}
+
                     return self.parse_magnet_uri(uri, no_cache=True, to_torrent=True, **func_args)
                 return jsonify({"success": False, "log": "missing parameter: 'uri'"})
         except Exception as e:
