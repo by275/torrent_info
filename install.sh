@@ -31,7 +31,7 @@ esac
 
 if [ -f /usr/bin/apt ]; then
     distro='ubuntu'
-    os_ver=$(cat /etc/lsb-release | grep DISTRIB_RELEASE | cut -d= -f2)
+    os_ver=$(< /etc/lsb-release grep DISTRIB_RELEASE | cut -d= -f2)
 elif [ -f /sbin/apk ]; then
     distro='alpine'
     os_ver=$(head -n1 /etc/apk/repositories | sed -e 's/.*\/v\(.*\)\/.*/\1/g')
@@ -41,7 +41,7 @@ else
 fi
 
 # find and delete
-if [ $1 = "-delete" ]; then
+if [ "$1" = "-delete" ]; then
     apt-get remove --purge -yqq python3-libtorrent || \
         apt-get remove --purge -yqq python-libtorrent
     find /usr -iname "*libtorrent*" -exec rm -rf {} +
@@ -50,8 +50,8 @@ fi
 
 # parsing lt_tag
 lt_tag="$1"
-lt_ver=$(echo $lt_tag | cut -d- -f1)
-lt_build=$(echo $lt_tag | cut -d- -f2)
+lt_ver=$(echo "$lt_tag" | cut -d- -f1)
+# lt_build=$(echo "$lt_tag" | cut -d- -f2)
 
 # making download url
 url_base="https://github.com/by275/docker-libtorrent/releases/download/$lt_tag/"
@@ -70,9 +70,8 @@ if [ $distro = "ubuntu" ]; then
     echo "Installing pre-built libs if possible ..."
     echo "===================================================================="
     echo ""
-    curl -sLJ "$down_url" | tar xvz -C /
     
-    if [ $? = "0" ]; then
+    if curl -sLJ "$down_url" | tar xvz -C /; then
         echo ""
         echo "===================================================================="
         echo "Installing runtime packages ..."
@@ -110,7 +109,7 @@ fi
 
 # checking installation
 pyver=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-export PYTHONPATH=/usr/lib/python$pyver/site-packages
+export PYTHONPATH=/usr/lib/python"$pyver"/site-packages
 LIBTORRENT_VER=$(python3 -c 'import libtorrent as lt; print(lt.version)')
 
 if [ $? = "0" ]; then

@@ -112,7 +112,7 @@ class LibTorrent:
         https://www.libtorrent.org/reference-Torrent_Info.html#torrent_info
         """
 
-        import libtorrent as lt
+        import libtorrent as lt  # pylint: disable=import-error
 
         _dict = {
             "name": self.lt_info.name(),
@@ -133,7 +133,7 @@ class LibTorrent:
         return _dict
 
     def to_file(self) -> Tuple[bytes, str]:
-        import libtorrent as lt
+        import libtorrent as lt  # pylint: disable=import-error
 
         _file = lt.bencode(self.lt_dict)
         _name = pathscrub(self.lt_info.name(), os="windows", filename=True)
@@ -147,7 +147,7 @@ class LibTorrent:
         torrent_file >> lt_dict >> lt_info + info_plus
         """
 
-        import libtorrent as lt
+        import libtorrent as lt  # pylint: disable=import-error
 
         _dict = lt.bdecode(torrent_file)
         _plus = {
@@ -172,7 +172,7 @@ class LibTorrent:
         https://www.libtorrent.org/reference-Add_Torrent.html#add_torrent_params
         """
 
-        import libtorrent as lt
+        import libtorrent as lt  # pylint: disable=import-error
 
         # default arguments
         if trackers is None:
@@ -227,7 +227,7 @@ class LibTorrent:
         https://www.libtorrent.org/reference-Session.html#session
         """
 
-        import libtorrent as lt
+        import libtorrent as lt  # pylint: disable=import-error
 
         # settings
         settings = copy(self.lt_settings)
@@ -240,9 +240,9 @@ class LibTorrent:
                     "proxy_password": proxy_url.password,
                     "proxy_hostname": proxy_url.hostname,
                     "proxy_port": proxy_url.port,
-                    "proxy_type": lt.proxy_type_t.http_pw
-                    if proxy_url.username and proxy_url.password
-                    else lt.proxy_type_t.http,
+                    "proxy_type": (
+                        lt.proxy_type_t.http_pw if proxy_url.username and proxy_url.password else lt.proxy_type_t.http
+                    ),
                     "force_proxy": True,
                     "anonymous_mode": True,
                 }

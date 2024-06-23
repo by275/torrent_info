@@ -5,19 +5,15 @@ import shlex
 from datetime import datetime
 from urllib.parse import quote
 
-# third-party
 import requests
 from flask import Response, jsonify, render_template
+from plugin import F, PluginModuleBase  # pylint: disable=import-error
 from sqlitedict import SqliteDict
+from tool import ToolModalCommand  # pylint: disable=import-error
 from werkzeug.exceptions import MethodNotAllowed
 
-# pylint: disable=import-error
-from plugin import F, PluginModuleBase
-from tool import ToolModalCommand
-
-# local
-from .util import LibTorrent
 from .setup import P
+from .util import LibTorrent
 
 plugin = P
 logger = plugin.logger
@@ -61,6 +57,7 @@ class LogicMain(PluginModuleBase):
             logger.exception("Exception on plugin load:")
 
     def process_menu(self, sub, req):
+        _ = req
         arg = ModelSetting.to_dict()
         arg["package_name"] = package_name
         if sub == "setting":
@@ -239,7 +236,7 @@ class LogicMain(PluginModuleBase):
     def update_tracker(self):
         # https://github.com/ngosang/trackerslist
         src_url = f"https://ngosang.github.io/trackerslist/trackers_{ModelSetting.get('tracker_update_from')}.txt"
-        new_trackers = requests.get(src_url).content.decode("utf8").split("\n\n")[:-1]
+        new_trackers = requests.get(src_url, timeout=30).content.decode("utf8").split("\n\n")[:-1]
         ModelSetting.set("trackers", json.dumps(new_trackers))
         ModelSetting.set("tracker_last_update", datetime.now().strftime("%Y-%m-%d"))
 
@@ -347,4 +344,4 @@ class LogicMain(PluginModuleBase):
         if http_proxy is None:
             http_proxy = ModelSetting.get("http_proxy")
         proxies = {"http": http_proxy, "https": http_proxy} if http_proxy else None
-        return self.parse_torrent_file(requests.get(url, proxies=proxies).content)
+        return self.parse_torrent_file(requests.get(url, proxies=proxies, timeout=30).content)
